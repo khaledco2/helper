@@ -1,40 +1,28 @@
-# 1. تعريف واجهة التحكم في الماوس (Win32 API) كما في الملفات الاحترافية
+# تعريف دوال النظام للتحكم في الماوس (Win32 API)
 $signature = @"
 [DllImport("user32.dll")]
 public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);
 [DllImport("user32.dll")]
 public static extern short GetAsyncKeyState(int vKey);
 "@
-$API = Add-Type -MemberDefinition $signature -Name "Win32Internal" -Namespace Win32 -PassThru
+$API = Add-Type -MemberDefinition $signature -Name "Win32MouseControl" -Namespace Win32 -PassThru
 
-# 2. إعدادات قيم الريكويل (نفس منطق الملف .T المستخرج)
-$PullDownAmount = 4   # مقدار السحب للأسفل (بكسل)
-$HorizontalShaky = 0  # التعديل الأفقي (اختياري)
-$DelayMs = 15         # سرعة التكرار (ميلي ثانية)
-$LeftMouseButton = 0x01 # كود تتبع زر الماوس الأيسر
+# إعدادات الريكويل (تستطيع تعديلها من جيت هاب مباشرة)
+$PullDownAmount = 5  # قوة السحب لأسفل
+$Delay = 20          # السرعة (ميلي ثانية)
 
-Write-Host "--- آلية التتبع والعمل العكسي نشطة ---" -ForegroundColor Cyan
-Write-Host "اضغط واستمر بضغط زر الماوس الأيسر للتفعيل" -ForegroundColor Yellow
-Write-Host "اضغط CTRL+C لإيقاف السكربت نهائياً" -ForegroundColor Red
+Write-Host "--- التتبع نشط من GitHub (نسخة PowerShell) ---" -ForegroundColor Green
 
-# 3. حلقة التتبع اللحظي (The Core Loop)
 try {
     while($true) {
-        # التحقق من حالة الزر الأيسر (GetAsyncKeyState)
-        # هذه هي نفس الطريقة التي يستخدمها ملف 18902677491.T للتتبع 
-        $isPressed = $API::GetAsyncKeyState($LeftMouseButton)
-        
-        if ($isPressed -lt 0) {
-            # تنفيذ "العمل العكسي": تحريك الماوس للأسفل (MOUSEEVENTF_MOVE = 0x0001)
+        # التتبع: التحقق من ضغط زر الماوس الأيسر (0x01)
+        if ($API::GetAsyncKeyState(0x01) -lt 0) {
+            # العمل العكسي: سحب الماوس لأسفل
             $API::mouse_event(0x0001, 0, $PullDownAmount, 0, 0)
-            
-            # تأخير بسيط لمحاكاة سرعة إطلاق النار في اللعبة
-            Start-Sleep -Milliseconds $DelayMs
-        } else {
-            # تقليل استهلاك المعالج عند عدم الضغط
-            Start-Sleep -Milliseconds 5
+            Start-Sleep -Milliseconds $Delay
         }
+        Start-Sleep -Milliseconds 5
     }
 } catch {
-    Write-Host "`nتم إيقاف آلية العمل." -ForegroundColor Gray
+    Write-Host "تم إيقاف السكربت."
 }
