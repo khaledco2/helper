@@ -7,58 +7,58 @@ import keyboard
 import ctypes
 from PIL import ImageGrab
 
-# --- إعدادات القوة والاستجابة ---
-SENSITIVITY = 2.8   # رفعنا الحساسية لضمان "التمسك" بالهدف
-ACCURACY = 0.01     # عتبة الحركة (كلما قل زاد التحسس)
+# --- إعدادات القوة والسكوبات ---
+BASE_SENSITIVITY = 1.8  # القوة الأساسية للرد دوت
+scope_multiplier = 1.0   # المضاعف الافتراضي
 is_running = False
 
 def start_engine():
-    global is_running
+    global is_running, scope_multiplier
     
-    # تحديد مركز الشاشة تلقائياً
     w, h = win32api.GetSystemMetrics(0), win32api.GetSystemMetrics(1)
     mid_x, mid_y = w // 2, h // 2
-    # منطقة مسح صغيرة جداً (50x50) لزيادة السرعة القصوى ومنع التعليق
-    ROI = (mid_x - 25, mid_y - 25, mid_x + 25, mid_y + 25)
+    ROI = (mid_x - 30, mid_y - 30, mid_x + 30, mid_y + 30)
     
-    print(f"[✔] نظام التتبع المستمر نشط | الدقة: {w}x{h}")
-    
-    # تحضير الإطار الأول
+    print(f"--- نظام السكوبات الذكي نشط ---")
+    print("F3: تشغيل | F4: إيقاف")
+    print("رقم 1: سكوب (Red Dot) | رقم 2: سكوب (2X) | رقم 3: سكوب (3X) | رقم 4: سكوب (4X)")
+
     prev_frame = np.array(ImageGrab.grab(bbox=ROI).convert('L'))
 
     while True:
-        # أزرار التحكم
+        # تبديل القوة حسب السكوب المستخدم
+        if keyboard.is_pressed('1'): scope_multiplier = 1.0; print("Mode: Red Dot")
+        if keyboard.is_pressed('2'): scope_multiplier = 1.6; print("Mode: Scope 2X")
+        if keyboard.is_pressed('3'): scope_multiplier = 2.4; print("Mode: Scope 3X")
+        if keyboard.is_pressed('4'): scope_multiplier = 3.5; print("Mode: Scope 4X")
+
         if keyboard.is_pressed('f3'): is_running = True
         if keyboard.is_pressed('f4'): is_running = False
 
         if is_running and win32api.GetAsyncKeyState(0x01) < 0:
-            # التقاط سريع جداً
             curr_frame = np.array(ImageGrab.grab(bbox=ROI).convert('L'))
             
-            # حساب الفرق بين الصورتين (المسؤول عن الثبات)
+            # خوارزمية محسنة لتقليل الاهتزاز (Smoothing)
             diff = cv2.absdiff(prev_frame, curr_frame)
-            _, thresh = cv2.threshold(diff, 20, 255, cv2.THRESH_BINARY)
+            _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
             
-            # حساب مركز الثقل للحركة (للتأكد من اتجاه الارتداد)
             M = cv2.moments(thresh)
-            if M["m00"] > 100: # إذا وجد حركة حقيقية
-                # سحب مستمر وليس لحظي
-                pull = int(SENSITIVITY * 8)
-                win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, 0, pull, 0, 0)
+            if M["m00"] > 80:
+                # حساب القوة النهائية بناءً على السكوب المختار
+                final_pull = int(BASE_SENSITIVITY * scope_multiplier * 6)
+                
+                # تقسيم الحركة لنبضات صغيرة جداً لتقليل الاهتزاز (Micro-steps)
+                for _ in range(2): 
+                    win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, 0, final_pull // 2, 0, 0)
+                    time.sleep(0.001)
             
-            # أهم خطوة: تحديث الإطار فوراً لضمان عدم "الافلات" في الطلقة التالية
             prev_frame = curr_frame
-            time.sleep(0.001) # تزامن فائق السرعة
         else:
-            # إعادة التقاط الإطار المرجعي عند التوقف عن الإطلاق
-            if time.time() % 0.1 < 0.01:
+            if time.time() % 0.2 < 0.01:
                 prev_frame = np.array(ImageGrab.grab(bbox=ROI).convert('L'))
         
-        time.sleep(0.001)
+        time.sleep(0.002)
 
 if __name__ == "__main__":
     if ctypes.windll.shell32.IsUserAnAdmin():
         start_engine()
-    else:
-        print("يرجى التشغيل كمسؤول!")
-        time.sleep(5)
