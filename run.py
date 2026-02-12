@@ -7,58 +7,74 @@ import keyboard
 import ctypes
 from PIL import ImageGrab
 
-# --- إعدادات القوة والسكوبات ---
-BASE_SENSITIVITY = 1.8  # القوة الأساسية للرد دوت
-scope_multiplier = 1.0   # المضاعف الافتراضي
-is_running = False
+# --- إعدادات الذكاء الفائق ---
+SENSITIVITY_RATIO = 2.5  # معامل القوة (يمكنك تعديله حسب تجربتك)
+is_active = False
 
-def start_engine():
-    global is_running, scope_multiplier
-    
+def play_sound(mode):
+    if mode == "on":
+        win32api.Beep(800, 150)
+        win32api.Beep(1200, 150)
+    elif mode == "off":
+        win32api.Beep(400, 300)
+    elif mode == "startup":
+        win32api.Beep(1000, 100)
+        win32api.Beep(1000, 100)
+
+def get_recoil_amount(prev, curr):
+    diff = cv2.absdiff(prev, curr)
+    _, thresh = cv2.threshold(diff, 30, 255, cv2.THRESH_BINARY)
+    moments = cv2.moments(thresh)
+    if moments["m00"] > 50:
+        dy = moments["m01"] / moments["m00"] - (thresh.shape[0] / 2)
+        return dy
+    return 0
+
+def run_smart_system():
+    global is_active
     w, h = win32api.GetSystemMetrics(0), win32api.GetSystemMetrics(1)
-    mid_x, mid_y = w // 2, h // 2
-    ROI = (mid_x - 30, mid_y - 30, mid_x + 30, mid_y + 30)
+    ROI = (w//2 - 60, h//2 - 60, w//2 + 60, h//2 + 60)
     
-    print(f"--- نظام السكوبات الذكي نشط ---")
-    print("F3: تشغيل | F4: إيقاف")
-    print("رقم 1: سكوب (Red Dot) | رقم 2: سكوب (2X) | رقم 3: سكوب (3X) | رقم 4: سكوب (4X)")
+    print("="*40)
+    print(" [✔] AI Dynamic System - ACTIVE")
+    print(" [✔] F3: ON (Beep Up) | F4: OFF (Beep Down)")
+    print("="*40)
+    
+    play_sound("startup") # صوت عند بداية تشغيل السكربت
 
     prev_frame = np.array(ImageGrab.grab(bbox=ROI).convert('L'))
 
     while True:
-        # تبديل القوة حسب السكوب المستخدم
-        if keyboard.is_pressed('1'): scope_multiplier = 1.0; print("Mode: Red Dot")
-        if keyboard.is_pressed('2'): scope_multiplier = 1.6; print("Mode: Scope 2X")
-        if keyboard.is_pressed('3'): scope_multiplier = 2.4; print("Mode: Scope 3X")
-        if keyboard.is_pressed('4'): scope_multiplier = 3.5; print("Mode: Scope 4X")
+        # التحكم بالصوت والتشغيل
+        if keyboard.is_pressed('f3') and not is_active:
+            is_active = True
+            play_sound("on")
+            print(">>> System: ON")
+        
+        if keyboard.is_pressed('f4') and is_active:
+            is_active = False
+            play_sound("off")
+            print(">>> System: OFF")
 
-        if keyboard.is_pressed('f3'): is_running = True
-        if keyboard.is_pressed('f4'): is_running = False
-
-        if is_running and win32api.GetAsyncKeyState(0x01) < 0:
+        if is_active and win32api.GetAsyncKeyState(0x01) < 0:
             curr_frame = np.array(ImageGrab.grab(bbox=ROI).convert('L'))
+            recoil_gap = get_recoil_amount(prev_frame, curr_frame)
             
-            # خوارزمية محسنة لتقليل الاهتزاز (Smoothing)
-            diff = cv2.absdiff(prev_frame, curr_frame)
-            _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
-            
-            M = cv2.moments(thresh)
-            if M["m00"] > 80:
-                # حساب القوة النهائية بناءً على السكوب المختار
-                final_pull = int(BASE_SENSITIVITY * scope_multiplier * 6)
-                
-                # تقسيم الحركة لنبضات صغيرة جداً لتقليل الاهتزاز (Micro-steps)
-                for _ in range(2): 
-                    win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, 0, final_pull // 2, 0, 0)
-                    time.sleep(0.001)
+            if recoil_gap > 0.5:
+                # الحساب الذكي لمقدار الارتداد الفعلي
+                pull_force = int(recoil_gap * SENSITIVITY_RATIO)
+                win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, 0, pull_force, 0, 0)
             
             prev_frame = curr_frame
         else:
-            if time.time() % 0.2 < 0.01:
+            if time.time() % 0.1 < 0.01:
                 prev_frame = np.array(ImageGrab.grab(bbox=ROI).convert('L'))
         
-        time.sleep(0.002)
+        time.sleep(0.005)
 
 if __name__ == "__main__":
     if ctypes.windll.shell32.IsUserAnAdmin():
-        start_engine()
+        run_smart_system()
+    else:
+        print("يرجى تشغيل البور شيل كمسؤول!")
+        time.sleep(5)
