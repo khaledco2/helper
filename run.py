@@ -1,10 +1,10 @@
 import win32api, keyboard, time, ctypes, os
 import pydirectinput
 from random import uniform
-# استيراد ملفك المساعد (تأكد أنه في نفس المجلد)
+# استيراد ملفك المساعد (يجب أن يكون بجانب السكربت)
 import dontExecute 
 
-# إعدادات السرعة القصوى وتخطي الحماية
+# إعدادات تخطي الحماية والأداء الأقصى
 pydirectinput.PAUSE = 0
 pydirectinput.FAILSAFE = False
 ctypes.windll.user32.SetProcessDPIAware()
@@ -17,33 +17,31 @@ class SilentAntiRecoil:
         self.recoil_values = [0, 0]
         
     def load_weapon_data(self):
-        """تحميل القيم من ملفك config.cfg إلى الذاكرة"""
+        """تحميل القيم من الذاكرة لتجنب البطء الناتج عن قراءة القرص"""
         try:
             slot_key = "slot1" if self.current_slot == 1 else "slot2"
             weapon_name = dontExecute.getConfig("Settings", slot_key)
             vals = dontExecute.getRecoilValues(weapon_name)
             self.recoil_values = [int(vals[0]), int(vals[1])]
-            # تنبيه صوتي عند تغيير السلاح (نغمتين للسلاح 2، نغمة للسلاح 1)
-            for _ in range(self.current_slot):
-                win32api.Beep(1200, 100)
-                time.sleep(0.05)
+            # نغمة صوتية عند تبديل السلاح
+            win32api.Beep(1200 if self.current_slot == 1 else 1500, 100)
         except:
             pass
 
     def run(self):
-        print("--- [ SCRIPT ACTIVE - SILENT MODE ] ---")
-        print("F3: Toggle RCS | 1 & 2: Switch Slots")
-        
-        # التأكد من وجود ملف الإعدادات
+        # التأكد من جاهزية ملف الإعدادات
         if not os.path.exists('config.cfg'):
             dontExecute.writeConfig()
         
         self.load_weapon_data()
+        print("--- SILENT ENGINE RUNNING (NO OVERLAY) ---")
+        print("F3: Toggle | 1 & 2: Switch Weapons")
 
         while True:
-            # 1. تفعيل/إيقاف السكربت (F3)
+            # 1. مفتاح التفعيل (F3) - صامت لا يظهر فوق اللعبة
             if keyboard.is_pressed('f3'):
                 self.rcs_active = not self.rcs_active
+                # نغمة حادة للتفعيل، غليظة للإيقاف
                 win32api.Beep(1000 if self.rcs_active else 500, 200)
                 time.sleep(0.3)
 
@@ -55,25 +53,26 @@ class SilentAntiRecoil:
                 self.current_slot = 2
                 self.load_weapon_data()
 
-            # 3. منطق السحب (أثناء الضغط على الماوس الأيسر)
+            # 3. منطق السحب (إطلاق النار)
             if self.rcs_active and win32api.GetAsyncKeyState(0x01) & 0x8000:
-                # التحقق أن اللعبة هي النافذة النشطة (باستخدام دالتك)
+                # التحقق من نافذة اللعبة باستخدام دالتك
                 if str(dontExecute.activeWindow()) == str(dontExecute.neededWindow(self.process_name)):
                     count = 0
                     while win32api.GetAsyncKeyState(0x01) & 0x8000:
-                        # جلب القيمة (أول 11 طلقة أو ما بعدها)
+                        # اختيار القيمة (أول 11 طلقة أو ما بعدها)
                         base_y = self.recoil_values[0] if count < 11 else self.recoil_values[1]
                         
-                        # إضافة عشوائية بسيطة (Humanization)
-                        jitter = uniform(-1.1, 1.1)
+                        # إضافة "فلترة الهدف" (Humanization)
+                        jitter = uniform(-1.2, 1.2)
                         final_y = int(round(base_y + jitter))
 
-                        # تصحيح Y وتجنب صفر الحركة
+                        # 4. تصحيح Y وتجنب صفر الحركة
                         if final_y > 1:
+                            # استخدام محاكي الهاردوير DirectInput
                             pydirectinput.moveRel(0, final_y, relative=True)
                         
                         count += 1
-                        time.sleep(0.09) # سرعة سحب متوافقة مع الأسلحة الآلية
+                        time.sleep(0.09) # سرعة متوافقة مع معدل إطلاق النار
 
             time.sleep(0.005)
 
