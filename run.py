@@ -9,7 +9,7 @@ from PIL import ImageGrab
 
 # --- إعدادات القوة والاستجابة ---
 SENSITIVITY = 3.8   # رفعنا الحساسية لضمان "التمسك" بالهدف
-ACCURACY = 0.01     # عتبة الحركة (كلما قل زاد التحسس)
+ACCURACY = 0.5     # عتبة الحركة (كلما قل زاد التحسس)
 is_running = False
 
 def start_engine():
