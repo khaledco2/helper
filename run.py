@@ -1,84 +1,64 @@
 import cv2
 import numpy as np
 import time
-import win32api, win32con, keyboard, ctypes
-import threading
-import mss
+import win32api
+import win32con
+import keyboard
+import ctypes
+from PIL import ImageGrab
 
-# --- الإعدادات ---
-SENSITIVITY = 0.5   # تعديل الحساسية لتناسب ميكانيكا الألعاب
-SMOOTHING = 0.2     # تنعيم الحركة (كلما قل زاد البطء والسلاسة)
-MONITOR_SIZE = 50   # مساحة المسح 50x50
-
+# --- إعدادات القوة والاستجابة ---
+SENSITIVITY = 3.8   # رفعنا الحساسية لضمان "التمسك" بالهدف
+ACCURACY = 0.5     # عتبة الحركة (كلما قل زاد التحسس)
 is_running = False
-
-def move_mouse_relative(dx, dy):
-    """ تحريك الفأرة بشكل نسبي سلس ليتوافق مع محركات الألعاب """
-    if dx != 0 or dy != 0:
-        # حساب الحركة المنعمة
-        move_x = int(dx * SENSITIVITY)
-        move_y = int(dy * SENSITIVITY)
-        win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, move_x, move_y, 0, 0)
-
-def detection_loop():
-    global is_running
-    sct = mss.mss()
-    
-    # تحديد منطقة المسح في منتصف الشاشة
-    w, h = win32api.GetSystemMetrics(0), win32api.GetSystemMetrics(1)
-    region = {
-        'top': (h // 2) - (MONITOR_SIZE // 2),
-        'left': (w // 2) - (MONITOR_SIZE // 2),
-        'width': MONITOR_SIZE,
-        'height': MONITOR_SIZE
-    }
-
-    # الإطار الأول
-    last_img = np.array(sct.grab(region))
-    last_gray = cv2.cvtColor(last_img, cv2.COLOR_BGRA2GRAY)
-
-    while True:
-        if is_running and win32api.GetAsyncKeyState(0x01) < 0:
-            # التقاط سريع
-            curr_img = np.array(sct.grab(region))
-            curr_gray = cv2.cvtColor(curr_img, cv2.COLOR_BGRA2GRAY)
-            
-            # فرق الحركة
-            diff = cv2.absdiff(last_gray, curr_gray)
-            _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
-            
-            M = cv2.moments(thresh)
-            if M["m00"] > 100:
-                cX = int(M["m10"] / M["m00"])
-                cY = int(M["m01"] / M["m00"])
-                
-                # المسافة عن المركز (25 هو منتصف الـ 50)
-                dx = cX - (MONITOR_SIZE // 2)
-                dy = cY - (MONITOR_SIZE // 2)
-                
-                move_mouse_relative(dx, dy)
-            
-            last_gray = curr_gray
-        else:
-            time.sleep(0.01) # تقليل استهلاك المعالج عند عدم الإطلاق
 
 def start_engine():
     global is_running
-    print("[✔] المحرك جاهز | F3 للتشغيل | F4 للإيقاف")
     
-    threading.Thread(target=detection_loop, daemon=True).start()
+    # تحديد مركز الشاشة تلقائياً
+    w, h = win32api.GetSystemMetrics(0), win32api.GetSystemMetrics(1)
+    mid_x, mid_y = w // 2, h // 2
+    # منطقة مسح صغيرة جداً (50x50) لزيادة السرعة القصوى ومنع التعليق
+    ROI = (mid_x - 25, mid_y - 25, mid_x + 25, mid_y + 25)
+    
+    print(f"[✔] نظام التتبع المستمر نشط | الدقة: {w}x{h}")
+    
+    # تحضير الإطار الأول
+    prev_frame = np.array(ImageGrab.grab(bbox=ROI).convert('L'))
 
     while True:
-        if keyboard.is_pressed('f3'):
-            is_running = True
-            print("RUNNING")
-        if keyboard.is_pressed('f4'):
-            is_running = False
-            print("STOPPED")
-        time.sleep(0.1)
+        # أزرار التحكم
+        if keyboard.is_pressed('f3'): is_running = True
+        if keyboard.is_pressed('f4'): is_running = False
+
+        if is_running and win32api.GetAsyncKeyState(0x01) < 0:
+            # التقاط سريع جداً
+            curr_frame = np.array(ImageGrab.grab(bbox=ROI).convert('L'))
+            
+            # حساب الفرق بين الصورتين (المسؤول عن الثبات)
+            diff = cv2.absdiff(prev_frame, curr_frame)
+            _, thresh = cv2.threshold(diff, 20, 255, cv2.THRESH_BINARY)
+            
+            # حساب مركز الثقل للحركة (للتأكد من اتجاه الارتداد)
+            M = cv2.moments(thresh)
+            if M["m00"] > 100: # إذا وجد حركة حقيقية
+                # سحب مستمر وليس لحظي
+                pull = int(SENSITIVITY * 8)
+                win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, 0, pull, 0, 0)
+            
+            # أهم خطوة: تحديث الإطار فوراً لضمان عدم "الافلات" في الطلقة التالية
+            prev_frame = curr_frame
+            time.sleep(0.001) # تزامن فائق السرعة
+        else:
+            # إعادة التقاط الإطار المرجعي عند التوقف عن الإطلاق
+            if time.time() % 0.1 < 0.01:
+                prev_frame = np.array(ImageGrab.grab(bbox=ROI).convert('L'))
+        
+        time.sleep(0.001)
 
 if __name__ == "__main__":
     if ctypes.windll.shell32.IsUserAnAdmin():
         start_engine()
     else:
-        print("أعد التشغيل كمسؤول!")
+        print("يرجى التشغيل كمسؤول!")
+        time.sleep(5)
