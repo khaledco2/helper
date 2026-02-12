@@ -7,75 +7,58 @@ import keyboard
 import ctypes
 from PIL import ImageGrab
 
-# --- الإعدادات الأساسية ---
-SENSITIVITY = 1.6   # قوة رد الفعل (ارفعها إذا كان السلاح لا يزال يرتفع)
-is_running = False  # الحالة الافتراضية
-
-def check_admin():
-    return ctypes.windll.shell32.IsUserAnAdmin()
+# --- إعدادات القوة والاستجابة ---
+SENSITIVITY = 2.8   # رفعنا الحساسية لضمان "التمسك" بالهدف
+ACCURACY = 0.01     # عتبة الحركة (كلما قل زاد التحسس)
+is_running = False
 
 def start_engine():
     global is_running
     
-    # منطقة الفحص (مركز الشاشة 100x100 بكسل)
-    # هذه المنطقة هي التي يراقب فيها السكربت حركة البكسلات
-    ROI = (910, 490, 1010, 590) 
+    # تحديد مركز الشاشة تلقائياً
+    w, h = win32api.GetSystemMetrics(0), win32api.GetSystemMetrics(1)
+    mid_x, mid_y = w // 2, h // 2
+    # منطقة مسح صغيرة جداً (50x50) لزيادة السرعة القصوى ومنع التعليق
+    ROI = (mid_x - 25, mid_y - 25, mid_x + 25, mid_y + 25)
     
-    print("="*45)
-    print(" [✔] نظام التتبع الديناميكي يعمل بنجاح")
-    print(" [!] F3: تفعيل (ON) | F4: إيقاف مؤقت (OFF)")
-    print(" [!] النظام يراقب الارتداد الآن ويعاكسه لحظياً")
-    print("="*45)
-
-    # التقاط أول إطار للمقارنة
+    print(f"[✔] نظام التتبع المستمر نشط | الدقة: {w}x{h}")
+    
+    # تحضير الإطار الأول
     prev_frame = np.array(ImageGrab.grab(bbox=ROI).convert('L'))
 
     while True:
-        # التحكم في التشغيل
-        if keyboard.is_pressed('f3') and not is_running:
-            is_running = True
-            print("[ON] >>> SYSTEM ACTIVE")
-            win32api.Beep(1000, 200)
-        
-        if keyboard.is_pressed('f4') and is_running:
-            is_running = False
-            print("[OFF] >>> SYSTEM PAUSED")
-            win32api.Beep(500, 400)
+        # أزرار التحكم
+        if keyboard.is_pressed('f3'): is_running = True
+        if keyboard.is_pressed('f4'): is_running = False
 
-        if is_running:
-            # التحقق من ضغط زر الفأرة الأيسر (0x01)
-            if win32api.GetAsyncKeyState(0x01) < 0:
-                # التقاط الإطار الحالي
-                curr_frame = np.array(ImageGrab.grab(bbox=ROI).convert('L'))
-                
-                # حساب الإزاحة بين الإطارين (Optical Flow)
-                # هذه الخوارزمية تكتشف أين تحركت البكسلات
-                flow = cv2.calcOpticalFlowFarneback(prev_frame, curr_frame, None, 0.5, 3, 15, 3, 5, 1.2, 0)
-                
-                # متوسط الحركة على المحور العمودي (Y)
-                movement_y = np.mean(flow[..., 1])
-                
-                # إذا تحركت الشاشة للأعلى (ارتداد)
-                if movement_y < -0.05:
-                    # حساب مقدار السحب العكسي
-                    pull_amount = int(abs(movement_y) * SENSITIVITY * 12)
-                    # تنفيذ السحب فوراً
-                    win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, 0, pull_amount, 0, 0)
-                
-                prev_frame = curr_frame
-            else:
-                # تحديث الإطار السابق أثناء عدم الإطلاق لضمان سلاسة المقارنة
+        if is_running and win32api.GetAsyncKeyState(0x01) < 0:
+            # التقاط سريع جداً
+            curr_frame = np.array(ImageGrab.grab(bbox=ROI).convert('L'))
+            
+            # حساب الفرق بين الصورتين (المسؤول عن الثبات)
+            diff = cv2.absdiff(prev_frame, curr_frame)
+            _, thresh = cv2.threshold(diff, 20, 255, cv2.THRESH_BINARY)
+            
+            # حساب مركز الثقل للحركة (للتأكد من اتجاه الارتداد)
+            M = cv2.moments(thresh)
+            if M["m00"] > 100: # إذا وجد حركة حقيقية
+                # سحب مستمر وليس لحظي
+                pull = int(SENSITIVITY * 8)
+                win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, 0, pull, 0, 0)
+            
+            # أهم خطوة: تحديث الإطار فوراً لضمان عدم "الافلات" في الطلقة التالية
+            prev_frame = curr_frame
+            time.sleep(0.001) # تزامن فائق السرعة
+        else:
+            # إعادة التقاط الإطار المرجعي عند التوقف عن الإطلاق
+            if time.time() % 0.1 < 0.01:
                 prev_frame = np.array(ImageGrab.grab(bbox=ROI).convert('L'))
         
-        time.sleep(0.007) # سرعة معالجة عالية جداً لتجنب التأخير (Lag)
+        time.sleep(0.001)
 
 if __name__ == "__main__":
-    if check_admin():
-        try:
-            start_engine()
-        except Exception as e:
-            print(f"حدث خطأ غير متوقع: {e}")
-            time.sleep(5)
+    if ctypes.windll.shell32.IsUserAnAdmin():
+        start_engine()
     else:
-        print("خطأ: يجب تشغيل PowerShell أو CMD كمسؤول!")
+        print("يرجى التشغيل كمسؤول!")
         time.sleep(5)
