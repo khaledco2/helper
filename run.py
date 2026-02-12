@@ -7,33 +7,25 @@ import keyboard
 import ctypes
 from mss import mss
 
-# --- إعدادات الاحتراف (المنطقة الذهبية) ---
-BASE_SENS = 0.32       # القوة الأساسية (متوازنة جداً)
-SMOOTHING = 0.15       # نعومة حريرية لمنع الارتجاف
-STABILIZER = 1.2       # قوة إضافية عند اكتشاف هروب السلاح للأعلى
+# --- الإعدادات الموزونة بعناية ---
+SENSITIVITY = 1.4       # تقليل القوة قليلاً لضمان عدم الهروب للأسفل
+THRESHOLD_VAL = 35      # تجاهل الاهتزازات البسيطة لزيادة الثبات
 is_active = False
 
-def run_perfect_system():
+def run_fine_tuned():
     global is_active
     sct = mss()
-    
-    # منطقة رؤية محسنة لا تخطئ الهدف
     monitor = {"top": win32api.GetSystemMetrics(1)//2 - 40, 
                "left": win32api.GetSystemMetrics(0)//2 - 40, 
                "width": 80, "height": 80}
 
-    print("--- [ Golden Edition: Stable & Smooth ] ---")
+    print("--- [ Fine-Tuned Original Logic ] ---")
     win32api.Beep(1000, 200)
 
-    last_pull = 0
-
     while True:
-        if keyboard.is_pressed('f3') and not is_active:
-            is_active = True
-            win32api.Beep(1200, 100)
-        if keyboard.is_pressed('f4') and is_active:
-            is_active = False
-            win32api.Beep(400, 200)
+        # F3 لتفعيل - F4 لإيقاف
+        if keyboard.is_pressed('f3'): is_active = True
+        if keyboard.is_pressed('f4'): is_active = False
 
         if is_active and win32api.GetAsyncKeyState(0x01) < 0:
             img = np.array(sct.grab(monitor))
@@ -41,35 +33,23 @@ def run_perfect_system():
 
             if 'prev_gray' in locals():
                 diff = cv2.absdiff(prev_gray, gray)
-                _, thresh = cv2.threshold(diff, 35, 255, cv2.THRESH_BINARY)
+                _, thresh = cv2.threshold(diff, THRESHOLD_VAL, 255, cv2.THRESH_BINARY)
                 M = cv2.moments(thresh)
                 
-                if M["m00"] > 50:
-                    # حساب المسافة التي قطعها السلاح للأعلى
-                    dist_y = (M["m01"] / M["m00"] - 40)
+                if M["m00"] > 60:
+                    # حساب السحب المباشر
+                    pull = (M["m01"] / M["m00"] - 40) * SENSITIVITY
                     
-                    # إذا كان السلاح يصعد بقوة، نزيد القوة تلقائياً
-                    current_sens = BASE_SENS
-                    if dist_y > 5: current_sens *= STABILIZER
-                    
-                    target_pull = dist_y * current_sens
-                    
-                    # تنعيم الحركة (السر في النعومة)
-                    final_move = last_pull + (target_pull - last_pull) * SMOOTHING
-                    
-                    if abs(final_move) > 0.1:
-                        win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, 0, int(final_move), 0, 0)
-                        last_pull = final_move
-                else:
-                    last_pull = 0
+                    # تنفيذ السحب فقط إذا كانت الحركة واضحة
+                    if abs(pull) > 1:
+                        win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, 0, int(pull), 0, 0)
             
             prev_gray = gray
         else:
-            last_pull = 0
+            if 'prev_gray' in locals(): del prev_gray
             time.sleep(0.01)
 
-        time.sleep(0.001) # استجابة فائقة السرعة
+        time.sleep(0.008) # تقليل التأخير قليلاً لزيادة الاستجابة
 
 if __name__ == "__main__":
-    if ctypes.windll.shell32.IsUserAnAdmin():
-        run_perfect_system()
+    run_fine_tuned()
