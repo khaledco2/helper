@@ -1,77 +1,97 @@
-import cv2
-import numpy as np
-import time
-import keyboard
-import ctypes
+import win32api
+import win32con
 import pydirectinput
-from mss import mss
+import keyboard
+import time
+import os
+import random
+import ctypes
+from random import randint, uniform
 
-# --- الإعدادات الفنية ---
-LOWER = np.array([35, 60, 60], dtype=np.uint8)
-UPPER = np.array([105, 255, 255], dtype=np.uint8)
+# إعدادات الحماية وتوافق الشاشة
+ctypes.windll.shcore.SetProcessDpiAwareness(1)
+pydirectinput.FAILSAFE = False # لمنع توقف السكربت عند وصول الماوس للزاوية
 
-SENSITIVITY = 1.4
-SMOOTHING = 0.6
+# --- المتغيرات الأساسية ---
+version = "3.0 PRO"
 is_active = False
+current_weapon = "AK"
+# مصفوفة الحساسية (يمكنك تعديل القيم هنا لتناسبك)
+# القيمة الأولى: سحب عمودي (Y)، القيمة الثانية: تنعيم (Smoothing)
+weapons = {
+    "AK": [12, 0.6], 
+    "M4": [8, 0.5],
+    "SMG": [5, 0.4]
+}
 
-# مصفوفة الأسلحة
-weapon_settings = {"AK": 1.5, "M4": 1.1}
-current_w = "AK"
+def draw_ui():
+    os.system('cls' if os.name == 'nt' else 'clear')
+    status = "ON" if is_active else "OFF"
+    print(f"==============================================")
+    print(f"   No-Recoil Hardware Emulator V{version}")
+    print(f"==============================================")
+    print(f" STATUS: {status} | WEAPON: {current_weapon}")
+    print(f"----------------------------------------------")
+    print(f" F3: ACTIVATE | F4: DEACTIVATE")
+    print(f" NUM1: AK | NUM2: M4 | NUM3: SMG")
+    print(f"----------------------------------------------")
+    print(f" [+] Real-time Y-Correction: ACTIVE")
+    print(f" [+] Zero-Movement Deadzone: ACTIVE")
+    print(f"==============================================")
 
-ctypes.windll.user32.SetProcessDPIAware()
-
-def run_advanced_engine():
-    global is_active
-    sct = mss()
-    screen_w = ctypes.windll.user32.GetSystemMetrics(0)
-    screen_h = ctypes.windll.user32.GetSystemMetrics(1)
-
-    # 1️⃣ توسيع منطقة الرصد (ROI)
-    # جعلناها 100x100 لتعقب السكوب حتى في الارتداد العنيف
-    mon_size = 100
-    monitor = {
-        "top": screen_h//2 - (mon_size//2), 
-        "left": screen_w//2 - (mon_size//2), 
-        "width": mon_size, 
-        "height": mon_size
-    }
-    center = mon_size // 2
-
-    print(f"--- [ Engine Active | ROI: {mon_size}x{mon_size} ] ---")
+def run_script():
+    global is_active, current_weapon
+    draw_ui()
+    
+    last_ui_update = time.time()
 
     while True:
-        if keyboard.is_pressed('f3'): is_active = True
-        if keyboard.is_pressed('f4'): is_active = False
+        # تحديث الواجهة عند التغيير
+        if time.time() - last_ui_update > 0.5:
+            # تم اختصار التحديث لتقليل استهلاك CPU
+            last_ui_update = time.time()
 
-        if is_active and ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000:
-            img = np.array(sct.grab(monitor))
-            hsv = cv2.cvtColor(img[:,:,:3], cv2.COLOR_BGR2HSV)
-            mask = cv2.inRange(hsv, LOWER, UPPER)
+        # مفاتيح التحكم
+        if keyboard.is_pressed('f3'): 
+            if not is_active:
+                is_active = True
+                win32api.Beep(1000, 100)
+                draw_ui()
+        if keyboard.is_pressed('f4'): 
+            if is_active:
+                is_active = False
+                win32api.Beep(500, 100)
+                draw_ui()
+
+        # اختيار السلاح
+        if keyboard.is_pressed('1'): current_weapon = "AK"; draw_ui()
+        if keyboard.is_pressed('2'): current_weapon = "M4"; draw_ui()
+        if keyboard.is_pressed('3'): current_weapon = "SMG"; draw_ui()
+
+        # منطق السحب (يعمل فقط عند الضغط على زر الماوس الأيسر والسكربت مفعل)
+        if is_active and win32api.GetAsyncKeyState(0x01) & 0x8000:
+            val_y = weapons[current_weapon][0]
+            smoothing = weapons[current_weapon][1]
+
+            # 1️⃣ إضافة عشوائية بسيطة لمنع كشف السكربت (Humanization)
+            random_factor = uniform(-1.5, 1.5)
             
-            # 3️⃣ تحسين فلترة الهدف (نصيحتك المورفولوجية)
-            mask = cv2.erode(mask, None, iterations=1)
-            mask = cv2.dilate(mask, None, iterations=1)
+            # 2️⃣ حساب السحب النهائي مع تصحيح اتجاه Y
+            # السحب للأسفل يكون بقيمة موجبة في pydirectinput
+            pull_y = int((val_y + random_factor) * smoothing)
 
-            M = cv2.moments(mask)
-            # فحص إذا كان هناك هدف كافٍ للرصد (تجنب الضوضاء)
-            if M["m00"] > 25: 
-                cX = int(M["m10"] / M["m00"])
-                cY = int(M["m01"] / M["m00"])
-                
-                # 2️⃣ تصحيح اتجاه Y وحساب المسافة عن المركز
-                diff_x = cX - center
-                diff_y = cY - center
-
-                # 4️⃣ تجنب صفر الحركة (Zero Movement Prevention)
-                # لا نرسل حركة إلا إذا تجاوز الفرق حداً معيناً لمنع الارتعاش
-                if abs(diff_x) > 1 or abs(diff_y) > 1:
-                    pull_x = int(diff_x * weapon_settings[current_w] * SMOOTHING)
-                    pull_y = int(diff_y * weapon_settings[current_w] * SMOOTHING)
-                    
-                    # إرسال الحركة عبر Hardware Emulation
-                    pydirectinput.moveRel(pull_x, pull_y, relative=True)
+            # 3️⃣ تجنب صفر الحركة (لا نرسل أوامر إذا كان السحب تافهاً)
+            if pull_y > 0:
+                # 4️⃣ استخدام DirectInput لتخطي حماية اللعبة (Kernel Level)
+                pydirectinput.moveRel(0, pull_y, relative=True)
+            
+            # سرعة التكرار متوافقة مع سرعة إطلاق النار (Rate of Fire)
+            time.sleep(0.01) 
 
         time.sleep(0.001)
 
 if __name__ == "__main__":
-    run_advanced_engine()
+    try:
+        run_script()
+    except KeyboardInterrupt:
+        print("\n[!] Script Stopped.")
