@@ -7,25 +7,20 @@ import keyboard
 import ctypes
 from mss import mss
 
-# --- إعدادات صياد العلامات ---
-SENSITIVITY = 1.4       # قوة سحب موزونة للسكوبات
+# --- إعدادات البصمة اللونية بناءً على صورك ---
+SENSITIVITY = 1.6  # قوة السحب المثالية لسكوباتك
 is_active = False
-
-# ضبط توافق الشاشة
 ctypes.windll.shcore.SetProcessDpiAwareness(1)
 
-def run_reticle_logic():
+def run_vision_precision():
     global is_active
     sct = mss()
-    
-    # الحصول على أبعاد الشاشة
     w, h = win32api.GetSystemMetrics(0), win32api.GetSystemMetrics(1)
     
-    # منطقة مسح صغيرة جداً في السنتر (حيث توجد علامة السكوب)
-    # 60x60 بكسل كافية جداً لاصطياد الرد دوت
-    monitor = {"top": h//2 - 30, "left": w//2 - 30, "width": 60, "height": 60}
+    # منطقة مسح مركزة جداً حول علامة السكوب
+    monitor = {"top": h//2 - 40, "left": w//2 - 40, "width": 80, "height": 80}
 
-    print("--- [ Reticle Hunter Active: Red Dot, 2x, 3x, 4x ] ---")
+    print("--- [ Vision Precision Mode: Cyan & Green Tracking ] ---")
     win32api.Beep(1000, 200)
 
     while True:
@@ -34,44 +29,42 @@ def run_reticle_logic():
 
         if is_active and win32api.GetAsyncKeyState(0x01) < 0:
             img = np.array(sct.grab(monitor))
+            # تحويل الصورة لنظام HSV لتمكين عزل الألوان التي أرسلتها
             hsv = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
             hsv = cv2.cvtColor(hsv, cv2.COLOR_BGR2HSV)
             
-            # --- السر: البحث عن اللون الأحمر والأخضر الصارخ (علامات السكوب) ---
-            # نطاق اللون الأحمر
-            lower_red = np.array([0, 120, 70])
-            upper_red = np.array([10, 255, 255])
-            mask_red = cv2.inRange(hsv, lower_red, upper_red)
+            # 1. نطاق اللون السماوي (Cyan) لصورك (4x & Dot)
+            lower_cyan = np.array([80, 100, 100])
+            upper_cyan = np.array([100, 255, 255])
+            mask_cyan = cv2.inRange(hsv, lower_cyan, upper_cyan)
             
-            # نطاق اللون الأخضر (للعلامات الخضراء)
-            lower_green = np.array([36, 100, 100])
-            upper_green = np.array([86, 255, 255])
+            # 2. نطاق اللون الأخضر (Green) لصورك (2x & 3x)
+            lower_green = np.array([40, 100, 100])
+            upper_green = np.array([75, 255, 255])
             mask_green = cv2.inRange(hsv, lower_green, upper_green)
             
-            # دمج العلامات مع حواف السكوب (3x, 4x)
-            final_mask = cv2.bitwise_or(mask_red, mask_green)
+            # دمج القناعين للبحث عن أي منهما
+            combined_mask = cv2.bitwise_or(mask_cyan, mask_green)
             
-            # إذا لم يجد ألواناً (مثل سكوب 4x الأسود)، نستخدم كشف الحواف للهيكل الداخلي
-            if cv2.countNonZero(final_mask) < 10:
-                gray = cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY)
-                final_mask = cv2.Canny(gray, 50, 150)
-
-            if 'prev_mask' in locals():
-                diff = cv2.absdiff(prev_mask, final_mask)
-                M = cv2.moments(diff)
+            # البحث عن مركز العلامة
+            M = cv2.moments(combined_mask)
+            if M["m00"] > 5: # إذا وجد العلامة الملونة
+                cX = int(M["m10"] / M["m00"])
+                cY = int(M["m01"] / M["m00"])
                 
-                if M["m00"] > 40:
-                    move_y = (M["m01"] / M["m00"] - 30)
-                    pull = move_y * SENSITIVITY
-                    if abs(pull) > 0.5:
-                        win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, 0, int(pull), 0, 0)
+                # حساب الإزاحة عن المركز (40 هو منتصف الـ 80)
+                diff_y = (cY - 40)
+                
+                if abs(diff_y) > 1: # إذا تحركت العلامة للأعلى
+                    pull = diff_y * SENSITIVITY
+                    win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, 0, int(pull), 0, 0)
             
-            prev_mask = final_mask
+            # حفظ الفريم الحالي كمرجع للسرعة
+            prev_mask = combined_mask
         else:
-            if 'prev_mask' in locals(): del prev_mask
             time.sleep(0.01)
 
-        time.sleep(0.002)
+        time.sleep(0.001)
 
 if __name__ == "__main__":
-    run_reticle_logic()
+    run_vision_precision()
