@@ -1,28 +1,35 @@
-# تعريف دوال النظام للتحكم في الماوس (Win32 API)
+# استدعاء الدوال المتقدمة للتحكم في الماوس من نظام ويندوز
 $signature = @"
 [DllImport("user32.dll")]
 public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);
 [DllImport("user32.dll")]
 public static extern short GetAsyncKeyState(int vKey);
 "@
-$API = Add-Type -MemberDefinition $signature -Name "Win32MouseControl" -Namespace Win32 -PassThru
+$API = Add-Type -MemberDefinition $signature -Name "SystemController" -Namespace Win32 -PassThru
 
-# إعدادات الريكويل (تستطيع تعديلها من جيت هاب مباشرة)
-$PullDownAmount = 5  # قوة السحب لأسفل
-$Delay = 20          # السرعة (ميلي ثانية)
+# إعدادات متقدمة (نفس آلية الملفات المرسلة)
+$BasePullDown = 4    # القوة الأساسية للسحب
+$RandomFactor = 2    # عامل التغيير العشوائي (للتخفي)
+$Delay = 15          # سرعة الاستجابة
 
-Write-Host "--- التتبع نشط من GitHub (نسخة PowerShell) ---" -ForegroundColor Green
+Write-Host "--- Script Loaded: Advanced Reverse Mechanism ---" -ForegroundColor Cyan
+Write-Host "Monitoring Hardware Input..." -ForegroundColor Gray
 
 try {
     while($true) {
-        # التتبع: التحقق من ضغط زر الماوس الأيسر (0x01)
+        # التتبع: فحص ضغط زر الماوس الأيسر (0x01)
         if ($API::GetAsyncKeyState(0x01) -lt 0) {
-            # العمل العكسي: سحب الماوس لأسفل
-            $API::mouse_event(0x0001, 0, $PullDownAmount, 0, 0)
+            
+            # العمل العكسي المتغير (يحاكي حركة اليد البشرية)
+            $FinalMove = $BasePullDown + (Get-Random -Minimum 0 -Maximum $RandomFactor)
+            
+            # تنفيذ الحركة العكسية (Relative Move)
+            $API::mouse_event(0x0001, 0, $FinalMove, 0, 0)
+            
             Start-Sleep -Milliseconds $Delay
         }
         Start-Sleep -Milliseconds 5
     }
 } catch {
-    Write-Host "تم إيقاف السكربت."
+    Write-Host "Disconnected."
 }
